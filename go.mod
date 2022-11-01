@@ -1,4 +1,4 @@
-module github.com/stellentus/go-plc
+module github.com/shorja/go-plc
 
 go 1.14
 
