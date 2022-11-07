@@ -101,6 +101,8 @@ func (dev *Device) Close() error {
 // ReadTag reads the requested tag into the provided value.
 // It is not thread safe. In a multi-threaded context, callers should ensure the appropriate
 // portion of the tag tree is locked.
+//
+// value must be a pointer type
 func (dev *Device) ReadTag(name string, value interface{}) error {
 	v := reflect.ValueOf(value)
 	if v.Kind() != reflect.Ptr {

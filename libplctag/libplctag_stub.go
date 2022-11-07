@@ -13,7 +13,7 @@ import "C"
 
 func init() {
 
-	fmt.Println("Hello from go-plc stub!")
+	fmt.Println("Hello from go-plc stub! Local Import!!!! Easy change!!")
 
 }
 

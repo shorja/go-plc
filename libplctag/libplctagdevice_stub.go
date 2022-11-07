@@ -1,0 +1,431 @@
+//go:build stub
+// +build stub
+
+package libplctag
+
+// #include <stdlib.h>
+// #include "./libplctag.h"
+import "C"
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/stellentus/go-plc"
+)
+
+// errorFromLibplctagReturnCode attempts to classify PLC errors according to whether it's some issue in the user input
+// or something internal to the PLC code (e.g. in go, libplctag, networking, or the PLC itsef).
+//func errorFromLibplctagReturnCode(code C.int32_t) error {
+//	switch code {
+//	case C.PLCTAG_STATUS_OK:
+//		return nil
+//
+//	// This isn't really an error, though our code shouldn't ever return it, so perhaps it should be ErrPlcInternal
+//	case C.PLCTAG_STATUS_PENDING:
+//		return fmt.Errorf("%w", plc.Pending)
+//
+//	// These are all bad requests
+//	case C.PLCTAG_ERR_BAD_CONFIG,
+//		C.PLCTAG_ERR_BAD_DEVICE, // trying to address something that doesn't exist
+//		C.PLCTAG_ERR_BAD_PARAM,  // this might indicate a problem with this go code
+//		C.PLCTAG_ERR_NOT_ALLOWED,
+//		C.PLCTAG_ERR_NOT_FOUND,
+//		C.PLCTAG_ERR_NO_DATA,
+//		C.PLCTAG_ERR_NO_MATCH,
+//		C.PLCTAG_ERR_OUT_OF_BOUNDS,
+//		C.PLCTAG_ERR_UNSUPPORTED:
+//		cstr := C.plc_tag_decode_error(C.int(code))
+//		return fmt.Errorf("%w: %s", plc.ErrBadRequest, C.GoString(cstr))
+//
+//	// These are all connection issues
+//	case C.PLCTAG_ERR_BAD_CONNECTION,
+//		C.PLCTAG_ERR_BAD_GATEWAY,
+//		C.PLCTAG_ERR_TIMEOUT,
+//		C.PLCTAG_ERR_PARTIAL:
+//		cstr := C.plc_tag_decode_error(C.int(code))
+//		return fmt.Errorf("%w: %s", plc.ErrPlcConnection, C.GoString(cstr))
+//
+//	// These are all internal errors
+//	case C.PLCTAG_ERR_ABORT, // This is likely a bug in this go code
+//		C.PLCTAG_ERR_BAD_DATA, // This could also be a connection issue
+//		C.PLCTAG_ERR_BAD_REPLY,
+//		C.PLCTAG_ERR_BAD_STATUS,
+//		C.PLCTAG_ERR_CLOSE,
+//		C.PLCTAG_ERR_CREATE,
+//		C.PLCTAG_ERR_DUPLICATE, // probably a libplctag error
+//		C.PLCTAG_ERR_ENCODE,    // probably a libplctag error, but could be an input issue
+//		C.PLCTAG_ERR_MUTEX_DESTROY,
+//		C.PLCTAG_ERR_MUTEX_INIT,
+//		C.PLCTAG_ERR_MUTEX_LOCK,
+//		C.PLCTAG_ERR_MUTEX_UNLOCK,
+//		C.PLCTAG_ERR_NOT_IMPLEMENTED,
+//		C.PLCTAG_ERR_NO_MEM,       // libplctag
+//		C.PLCTAG_ERR_NO_RESOURCES, // PLC
+//		C.PLCTAG_ERR_NULL_PTR,     // could also occur if an invalid handle is used, which would be a bug in go code
+//		C.PLCTAG_ERR_OPEN,
+//		C.PLCTAG_ERR_READ,
+//		C.PLCTAG_ERR_REMOTE_ERR,
+//		C.PLCTAG_ERR_THREAD_CREATE, // This might need special handling, as it indicates libplctag is in a *very* bad state
+//		C.PLCTAG_ERR_THREAD_JOIN,
+//		C.PLCTAG_ERR_TOO_LARGE, // more data returned than expected
+//		C.PLCTAG_ERR_TOO_SMALL,
+//		C.PLCTAG_ERR_WINSOCK,
+//		C.PLCTAG_ERR_WRITE,
+//		C.PLCTAG_ERR_BUSY:
+//		cstr := C.plc_tag_decode_error(C.int(code))
+//		return fmt.Errorf("%w: %s", plc.ErrPlcInternal, C.GoString(cstr))
+//
+//	default:
+//		cstr := C.plc_tag_decode_error(C.int(code))
+//		return fmt.Errorf("%w: Unclassified error (%s)", plc.ErrPlcInternal, C.GoString(cstr))
+//	}
+//}
+
+func DoesIsStub() {
+	fmt.Println("Yes Is Stub")
+}
+
+type DebugLevel int
+
+const (
+	DebugNone = DebugLevel(iota)
+	DebugError
+	DebugWarn
+	DebugInfo
+	DebugDetail
+	DebugSpew
+)
+
+const SystemTagBit = 0x1000
+const TagDimensionMask = 0x6000
+
+func SetDebug(level DebugLevel) {
+}
+
+// libplctagDevice is an instance of the rawDevice interface.
+// It communicates with a PLC over the network by using the libplctag C library.
+type device struct {
+	conConf string
+	ids     sync.Map
+	timeout C.int
+	data    map[string]interface{}
+	data2   sync.Map
+}
+
+var _ = rawDevice(&device{})      // Compiler makes sure this type is a rawDevice
+var _ = plc.ReadWriter(&device{}) // Compiler makes sure this type is a ReadWriter
+
+// newLibplctagDevice creates a new libplctagDevice.
+// The conConf string provides IP and other connection configuration (see libplctag for options).
+// It is not thread safe.
+func newDevice(conConf string, timeout time.Duration) *device {
+	return &device{
+		conConf: conConf,
+		timeout: C.int(timeout.Milliseconds()),
+	}
+}
+
+// Close should be called on the libplctagDevice to clean up its resources.
+func (dev *device) Close() error {
+	return nil
+}
+
+const (
+	noOffset         = C.int(0)
+	stringDataOffset = 4
+	stringMaxLength  = 82 // Size according to libplctag. Seems like an underlying protocol thing.
+)
+
+//func (dev *device) getID(tagName string) (C.int32_t, error) {
+//	val, ok := dev.ids.Load(tagName)
+//	if ok {
+//		return val.(C.int32_t), nil
+//	}
+//
+//	cattrib_str := C.CString(dev.conConf + "&name=" + tagName) // can also specify elem_size=1&elem_count=1
+//	defer C.free(unsafe.Pointer(cattrib_str))
+//
+//	id := C.plc_tag_create(cattrib_str, dev.timeout)
+//	if id < 0 {
+//		return id, errorFromLibplctagReturnCode(id)
+//	}
+//	dev.ids.Store(tagName, id)
+//	return id, nil
+//}
+
+func (dev *device) readTagMap(name string, value interface{}) error {
+	if dev.data == nil {
+		fmt.Println("Make da map")
+		dev.data = make(map[string]interface{})
+	}
+
+	_, ok := dev.data2.Load(name)
+
+	switch val := value.(type) {
+	case *bool:
+		if !ok {
+			dev.data2.Store(name, false)
+			//dev.data[name] = false
+		}
+		//*val = (dev.data[name]).(bool)
+		v, _ := dev.data2.Load(name)
+		*val = v.(bool)
+	case *uint8:
+		if !ok {
+			//dev.data[name] = uint8(5)
+			dev.data2.Store(name, uint8(5))
+		}
+		//*val = (dev.data[name]).(uint8)
+		v, _ := dev.data2.Load(name)
+		*val = v.(uint8)
+	case *uint16:
+		if !ok {
+			//dev.data[name] = uint16(5)
+			dev.data2.Store(name, uint16(5))
+		}
+		v, _ := dev.data2.Load(name)
+		*val = v.(uint16)
+	case *uint32:
+		if !ok {
+			//dev.data[name] = uint32(5)
+			dev.data2.Store(name, uint32(5))
+		}
+		//*val = dev.data[name].(uint32)
+		v, _ := dev.data2.Load(name)
+		*val = v.(uint32)
+	case *uint64:
+		if !ok {
+			//dev.data[name] = uint64(5)
+			dev.data2.Store(name, uint64(5))
+		}
+		//*val = dev.data[name].(uint64)
+		v, _ := dev.data2.Load(name)
+		*val = v.(uint64)
+	case *int8:
+		if !ok {
+			//dev.data[name] = int8(5)
+			dev.data2.Store(name, int8(5))
+		}
+		//*val = dev.data[name].(int8)
+		v, _ := dev.data2.Load(name)
+		*val = v.(int8)
+	case *int16:
+		if !ok {
+			//dev.data[name] = int16(5)
+			dev.data2.Store(name, int16(5))
+		}
+		//*val = dev.data[name].(int16)
+		v, _ := dev.data2.Load(name)
+		*val = v.(int16)
+	case *int32:
+		if !ok {
+			//dev.data[name] = int32(5)
+			dev.data2.Store(name, int32(5))
+		}
+		//*val = dev.data[name].(int32)
+		v, _ := dev.data2.Load(name)
+		*val = v.(int32)
+	case *int64:
+		if !ok {
+			//dev.data[name] = int64(5)
+			dev.data2.Store(name, int64(5))
+		}
+		//*val = dev.data[name].(int64)
+		v, _ := dev.data2.Load(name)
+		*val = v.(int64)
+	case *float32:
+		if !ok {
+			//dev.data[name] = float32(5.0)
+			dev.data2.Store(name, float32(5))
+		}
+		//*val = dev.data[name].(float32)
+		v, _ := dev.data2.Load(name)
+		*val = v.(float32)
+	case *float64:
+		if !ok {
+			//dev.data[name] = float64(5.0)
+			dev.data2.Store(name, float64(5))
+		}
+		//*val = dev.data[name].(float64)
+		v, _ := dev.data2.Load(name)
+		*val = v.(float64)
+	default:
+		return fmt.Errorf("ReadTag: %w: unknown type %T (%v)", plc.ErrBadRequest, val, val)
+	}
+
+	return nil
+}
+
+// ReadTag reads the requested tag into the provided value.
+// It is not thread safe. In a multi-threaded context, callers should ensure the appropriate
+// portion of the tag tree is locked.
+func (dev *device) ReadTag(name string, value interface{}) error {
+	return dev.readTagMap(name, value)
+}
+
+func (dev *device) writeTagMap(name string, value interface{}) error {
+	//if dev.data == nil {
+	//	fmt.Println("Make da map")
+	//	dev.data = make(map[string]interface{})
+	//}
+
+	// this seems mega unnecessary but it preserves
+	// the type checks
+	switch val := value.(type) {
+	case bool:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case uint8:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case uint16:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case uint32:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case uint64:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case int8:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case int16:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case int32:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case int64:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case float32:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	case float64:
+		//dev.data[name] = val
+		dev.data2.Store(name, val)
+	default:
+		return fmt.Errorf("WriteTag: %w: unknown type %T (%v)", plc.ErrBadRequest, val, val)
+	}
+
+	return nil
+}
+
+// WriteTag writes the provided tag and value.
+// It is not thread safe. In a multi-threaded context, callers should ensure the appropriate
+// portion of the tag tree is locked.
+func (dev *device) WriteTag(name string, value interface{}) error {
+	return dev.writeTagMap(name, value)
+}
+
+func (dev *device) GetList(listName, prefix string) ([]plc.Tag, []string, error) {
+	tags := []plc.Tag{}
+	programNames := []string{}
+
+	return tags, programNames, nil
+}
+
+//func addTagDimension(tag *plc.Tag, dim int) {
+//	if dim <= 0 {
+//		return
+//	}
+//	tag.Dimensions = append(tag.Dimensions, dim)
+//}
+//
+//func getBool(id C.int32_t, offset C.int) (bool, error) {
+//	result, err := getUint8(id, offset)
+//	return result > 0, err
+//}
+//
+//func getUint8(id C.int32_t, offset C.int) (uint8, error) {
+//	result := uint8(C.plc_tag_get_uint8(id, offset))
+//	if result == math.MaxUint8 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getUint16(id C.int32_t, offset C.int) (uint16, error) {
+//	result := uint16(C.plc_tag_get_uint16(id, offset))
+//	if result == math.MaxUint16 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getUint32(id C.int32_t, offset C.int) (uint32, error) {
+//	result := uint32(C.plc_tag_get_uint32(id, offset))
+//	if result == math.MaxUint32 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getUint64(id C.int32_t, offset C.int) (uint64, error) {
+//	result := uint64(C.plc_tag_get_uint64(id, offset))
+//	if result == math.MaxUint64 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getInt8(id C.int32_t, offset C.int) (int8, error) {
+//	result := int8(C.plc_tag_get_int8(id, offset))
+//	if result == math.MinInt8 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getInt16(id C.int32_t, offset C.int) (int16, error) {
+//	result := int16(C.plc_tag_get_int16(id, offset))
+//	if result == math.MinInt16 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getInt32(id C.int32_t, offset C.int) (int32, error) {
+//	result := int32(C.plc_tag_get_int32(id, offset))
+//	if result == math.MinInt32 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getInt64(id C.int32_t, offset C.int) (int64, error) {
+//	result := int64(C.plc_tag_get_int64(id, offset))
+//	if result == math.MinInt64 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getFloat32(id C.int32_t, offset C.int) (float32, error) {
+//	result := float32(C.plc_tag_get_float32(id, offset))
+//	if result == math.SmallestNonzeroFloat32 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
+//
+//func getFloat64(id C.int32_t, offset C.int) (float64, error) {
+//	result := float64(C.plc_tag_get_float64(id, offset))
+//	if result == math.SmallestNonzeroFloat64 {
+//		// If libplctag returns this value, it might be an error, so check
+//		return result, errorFromLibplctagReturnCode(C.plc_tag_status(id))
+//	}
+//	return result, nil
+//}
